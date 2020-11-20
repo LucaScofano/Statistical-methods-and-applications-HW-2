@@ -1,0 +1,934 @@
+---
+title: "Homework 3 Scofano"
+author: "Luca Scofano"
+output: html_document
+---
+## Estimating a population mean. . . in 2020. . .
+   
+```{r message = FALSE, warning=FALSE}
+set.seed(123)
+library(EnvStats) # useful to create pareto random variables
+library(MASS)
+library(Metrics)
+
+# Explore the data
+library(ggplot2)
+library(plotly)
+library(car)
+require(gridExtra) # otput multiple plots toghether 
+library(moments) # used to measure kurtosis and skewness
+library(GGally)
+
+library(heavy)
+library( psych )
+library(Gmedian)
+library(gdata) # concatenate matrices
+library(reshape2)
+
+library(knitr)
+library(kableExtra)
+library(boot)
+```
+
+## Exercise 1 - Univariate universe
+
+What's the task?
+
+First of all we pick two different dsitributions to analyze:
+
+1. Exponential (light tails)
+2. Pareto (heavy tails)
+
+There are a couple of common features of the two, for example they are both positively skewed and used to capture the "outliers" of a distribution. As we said the key difference is the weight of the tails.
+
+We are asked to compute both the MSE for the **mean** estimator and the MSE for the **MoM** estimator.
+
+```{r}
+N <- 1000 # we want to generate 1000 different random variables
+set.seed(123)
+
+loc <- 3 # shape
+shape <- 1.5 # scale
+```
+
+```{r}
+# Mean
+mean.exp <- rep(NA, N)
+mean.par <- rep(NA, N)
+
+## Optimal k
+alpha <- 0.05
+k.opt <- ceiling(8*log(1/alpha)) # optimal k
+```
+
+**Median of mean function**
+
+```{r}
+mom <- function(v) {
+  m <- rep(NA, length(v)) # empty list of means 
+  m <- sapply(v, mean) # list of means 
+  med <- median(m)
+  return(med)
+}
+```
+
+**Creation of variables:** 
+
+```{r}
+mom.exp <- rep(NA, N)
+mean.exp <- rep(NA, N)
+
+mom.par <- rep(NA, N)
+mean.par <- rep(NA, N)
+
+```
+
+### 1.1 Montecarlo method
+
+```{r}
+for(i in 1:N){
+  
+  # Create variables
+  exp <- rexp(N, rate = 1) 
+  par <- rpareto(N, loc, shape) 
+  
+  # Exponential 
+  k.exp <- split(exp, ceiling(seq_along(exp)/k.opt)) # split the initial vector into a smaller chunks
+  # pareto 
+  k.par <- split(par, ceiling(seq_along(par)/k.opt))
+  
+  # Method of moments and mean for both distributions
+  mom.exp[i] <- round(mom(k.exp), 4)
+  mean.exp[i] <- mean(exp)
+  
+  mom.par[i] <- round(mom(k.par), 4)
+  mean.par[i] <- mean(par)
+
+}
+```
+
+### 1.2 Plots
+
+#### Exponential distribution: 
+
+```{r, echo=FALSE}
+ggplot(data.frame(x = exp), aes(x = x)) + 
+  geom_density(fill="#69b3a2", color="darkseagreen4", alpha=0.8)
+```
+
+#### Pareto distribution:
+
+```{r, echo = FALSE}
+ggplot(data.frame(x = par), aes(x = x)) + 
+  geom_density(fill="darkorange1", color="darkorange1", alpha=0.8)
+```
+
+Thanks to the plots we can visually check what we've stated previously, the Pareto distribution has heavier tails but both distributions are positively skewed.
+
+### 1.3 MSE 
+
+Let's briefly discuss on what the MoM is.
+The definition of the median-of-means estimator calls for partitioning the
+data into k groups of roughly equal size, computing the empirical mean in each
+group, and taking the median of the obtained values. A reasonable question could be, **why does it work?** Because for each block we compute the empirical mean, an unbiased estimator for the mean.
+
+The main goal is to construct estimators that are “close” to the true mean µ, with “high probability”. Is this possible for light tails distributions and heavy ones?
+
+##### Bias, Variance and MSE
+
+```{r}
+bias.mean.exp <- mean(mean.exp)-1 
+exp.par <- (shape*loc)/(shape-1)
+bias.mean.par <- mean(mean.par)-exp.par
+var.mean.exp <- round(var(mean.exp), 4)
+var.mean.par <- round(var(mean.par), 4)
+mse.mean.exp <- round(var.mean.exp+(bias.mean.exp)^2, 6)
+mse.mean.par <- round(var.mean.par+(bias.mean.par)^2, 6)
+
+bias.mom.exp <- mean(mom.exp)-1 
+bias.mom.par <- mean(mom.par)-exp.par
+var.mom.exp <- round(var(mom.exp), 4)
+var.mom.par <- round(var(mom.par), 4)
+mse.mom.exp <- round(var.mom.exp+(bias.mom.exp)^2, 6)
+mse.mom.par <- round(var.mom.par+(bias.mom.par)^2, 6)
+```
+
+
+```{r, echo = FALSE}
+# Summary for exponential distribution
+mat.exp = c( mean(mean.exp), mean(mom.exp), bias.mean.exp, bias.mom.exp, var.mean.exp, var.mom.exp, mse.mean.exp, mse.mom.exp  )
+mat.exp = matrix(mat.exp, ncol = 1, byrow = TRUE)
+colnames(mat.exp) = ("Exponential")
+rownames(mat.exp) = c("Mean", "Estimator", "Bias Mean", "Bias MoM", "Variance Mean", "Variance MoM", "MSE mean", "MSE mom")
+t1 = as.table(mat.exp)
+```
+
+```{r, echo = FALSE}
+# Summary for pareto distribution
+mat.par = c( mean(mean.par), mean(mom.par), bias.mean.par, bias.mom.par, var.mean.par, var.mom.par, mse.mean.par, mse.mom.par  )
+mat.par = matrix(mat.par, ncol = 1, byrow = TRUE)
+colnames(mat.par) = ("Pareto")
+rownames(mat.par) = c("Mean", "Estimator", "Bias Mean", "Bias MoM", "Variance Mean", "Variance MoM", "MSE mean", "MSE mom")
+t2 = as.table(mat.par)
+```
+
+#### What are the results we get?
+
+```{r, echo=FALSE}
+concat_data <- cbindX(t1, t2) # or cbindX(matrix1, matrix2, matrix3, matrix4)
+kable(concat_data)%>% 
+  kable_styling(latex_options = "scale_down")%>%
+  row_spec(7, bold = T, color = "white", background = "#ff8080")%>%
+  row_spec(8, bold = T, color = "white", background = "#85e0e0")
+# output matrix
+```
+
+For this first calculation we only use the theoretical optimal number of k's: 
+$$\left \lceil 8\sigma log(\frac{1}{\alpha }) \right \rceil$$
+If we pick $${\alpha} = 0.05 $$ then k opt is 24.
+We can clearly state that for the **Exponential** case the mean is the optimal estimator, since it's MSE is smaller compared to the MoM's MSE. 
+On the other side, for the **Pareto** distribution we can see that the MoM is the optimal estimator (based on the MSE's).
+
+
+### 1.4 Different values of k
+
+I decide to pick different values of k, they go from 10 to 100 with steps of 5.
+
+```{r}
+k <- seq(from = 10, to = 100, by = 5)
+
+mean.exp.vec <- matrix(NA, nrow = length(k), ncol = 1000) # ncol = lenghth(k)
+mean.par.vec <- matrix(NA, nrow = length(k), ncol = 1000)
+
+mom.exp.vec <- matrix(NA, nrow = length(k), ncol = 1000)
+mom.par.vec <- matrix(NA, nrow = length(k), ncol = 1000)
+```
+
+Create, split and compute mean and mom
+
+```{r}
+for(j in 1:(length(k))){
+  
+  for(i in 1:N){
+    
+    # Create variables
+    exp <- rexp(N, rate = 1) 
+    par <- rpareto(N, loc, shape) 
+    
+    # Exponential 
+    k.exp.vec <- split(exp, ceiling(seq_along(exp)/k[j])) # exponential
+    k.par.vec <- split(par, ceiling(seq_along(par)/k[j])) # pareto
+    
+    
+    mom.exp.vec[j,i] <- round(mom(k.exp.vec), 4)
+    mean.exp.vec[j,i] <- mean(exp)
+    
+    mom.par.vec[j, i] <- round(mom(k.par.vec), 4)
+    mean.par.vec[j, i] <- mean(par)
+
+  }
+
+}
+```
+
+```{r, echo=FALSE}
+# BIAS, VARIANCE and MSE
+bias.vec.mean.exp <- rep(NA, length(k))
+exp.vec.par  <- rep(NA, length(k))
+bias.vec.mean.par  <- rep(NA, length(k))
+var.vec.mean.exp  <- rep(NA, length(k))
+var.vec.mean.par  <- rep(NA, length(k))
+mse.vec.mean.exp  <- rep(NA, length(k))
+mse.vec.mean.par  <- rep(NA, length(k))
+
+bias.vec.mom.exp  <- rep(NA, length(k)) 
+bias.vec.mom.par  <- rep(NA, length(k))
+var.vec.mom.exp  <- rep(NA, length(k))
+var.vec.mom.par  <- rep(NA, length(k))
+mse.vec.mom.exp  <- rep(NA, length(k))
+mse.vec.mom.par  <- rep(NA, length(k))
+```
+
+##### Bias, Variance and MSE
+
+```{r}
+for(j in 1:(length(k))){
+  
+  for(i in 1:N){
+
+    bias.vec.mean.exp[j] <- mean(mean.exp.vec[j, ])-1 
+    exp.vec.par[j]  <- (shape*loc)/(shape-1)
+    bias.vec.mean.par[j]  <- mean(mean.par.vec[j, ])-exp.vec.par[j]
+    var.vec.mean.exp[j]  <- round(var(mean.exp.vec[j, ]), 4)
+    var.vec.mean.par[j]  <- round(var(mean.par.vec[j, ]), 4)
+    mse.vec.mean.exp[j]  <- round(var.vec.mean.exp[j]+(bias.vec.mean.exp[j])^2, 6)
+    mse.vec.mean.par[j]  <- round(var.vec.mean.par[j]+(bias.vec.mean.par[j])^2, 6)
+    
+    bias.vec.mom.exp[j]  <- mean(mom.exp.vec[j, ])-1 
+    bias.vec.mom.par[j]  <- mean(mom.par.vec[j, ])-exp.vec.par[j]
+    var.vec.mom.exp[j]  <- round(var(mom.exp.vec[j, ]), 4)
+    var.vec.mom.par[j]  <- round(var(mom.par.vec[j, ]), 4)
+    mse.vec.mom.exp[j]  <- round(var.vec.mom.exp[j]+(bias.vec.mom.exp[j])^2, 6)
+    mse.vec.mom.par[j]  <- round(var.vec.mom.par[j]+(bias.vec.mom.par[j])^2, 6)
+ 
+  }
+  
+}
+```
+
+### Let's draw our conclusions
+
+
+#### Exponential:
+
+```{r, echo = FALSE}
+# Summary for exponential distribution
+mat.exp = c(rowMeans(mean.exp.vec), rowMeans(mom.exp.vec), bias.vec.mean.exp, bias.vec.mom.exp, var.vec.mean.exp, var.vec.mom.exp, mse.vec.mean.exp, mse.vec.mom.exp  )
+mat.exp = matrix(mat.exp, ncol = length(k), byrow = TRUE)
+colnames(mat.exp) = k
+rownames(mat.exp) = c("Mean", "Estimator", "Bias Mean", "Bias MoM", "Variance Mean", "Variance MoM", "MSE mean", "MSE mom")
+t1.k = as.table(mat.exp)
+kable(t1.k) %>% 
+  kable_styling(latex_options = "scale_down")%>%
+  row_spec(7, bold = T, color = "white", background = "#ff8080")%>%
+  row_spec(8, bold = T, color = "white", background = "#85e0e0")
+
+
+
+```
+
+##### mean vs mom
+
+```{r, echo = FALSE}
+df <- data.frame(k= k, mean = t1.k["MSE mean",], mom= t1.k["MSE mom",])
+m <- melt(df, id='k')
+ggplot(m,aes(x=k,y=value,fill=variable)) + 
+  geom_bar(stat="identity",position="dodge", alpha=.5)
+
+```
+
+
+##### Pareto:
+
+```{r, echo = FALSE}
+# Summary for pareto distribution
+mat.par = c(rowMeans(mean.par.vec), rowMeans(mom.par.vec), bias.vec.mean.par, bias.vec.mom.par, var.vec.mean.par, var.vec.mom.par, mse.vec.mean.par, mse.vec.mom.par  )
+mat.par = matrix(mat.par, ncol = length(k), byrow = TRUE)
+colnames(mat.par) = k
+rownames(mat.par) = c("Mean", "Estimator", "Bias Mean", "Bias MoM", "Variance Mean", "Variance MoM", "MSE mean", "MSE mom")
+t2.k = as.table(mat.par)
+kable(t2.k)%>%
+  kable_styling(latex_options = "scale_down")%>%
+  row_spec(7, bold = T, color = "white", background = "#ff8080")%>%
+  row_spec(8, bold = T, color = "white", background = "#85e0e0")
+```
+
+##### mean vs mom
+
+```{r, echo = FALSE}
+df <- data.frame(k= k, mean = t2.k["MSE mean",], mom= t2.k["MSE mom",])
+m <- melt(df, id='k')
+ggplot(m,aes(x=k,y=value,fill=variable)) + 
+  geom_bar(stat="identity",position="dodge", alpha=.5)
+```
+
+
+### Normal vs T-student
+
+Why did I pick this face-off? Well, the Normal distribution is the most notorious light tailed distribution there is and the T-student one is kind of similar. Thanks to the degrees of freedom we can create a reinterpretation of a Normal distribution, the more this value grows and the more it will look like a Normal distribution, with light tails and values close to the mean.
+
+#### Normal distribution: 
+
+```{r, echo=FALSE}
+ggplot(data.frame(x = rnorm(N)), aes(x = x)) + 
+  geom_density(fill="#69b3a2", color="darkseagreen4", alpha=0.8)
+```
+
+#### T-student distribution:
+
+```{r, echo = FALSE}
+ggplot(data.frame(x = rt(N, 1.5) ), aes(x = x)) + 
+  geom_density(fill="darkorange1", color="darkorange1", alpha=0.8)
+```
+
+### 1.4 Different values of k
+
+I decide to pick different values of k, they go from 10 to 100 with steps of 5.
+
+```{r}
+N <- 1000 # we want to generate 1000 different random variables
+set.seed(123)
+k <- seq(from = 10, to = 100, by = 5)
+
+mean.norm.vec <- matrix(NA, nrow = length(k), ncol = 1000) 
+mean.stud.vec <- matrix(NA, nrow = length(k), ncol = 1000)
+
+mom.norm.vec <- matrix(NA, nrow = length(k), ncol = 1000)
+mom.stud.vec <- matrix(NA, nrow = length(k), ncol = 1000)
+```
+
+Create, split and compute mean and mom
+
+```{r}
+for(j in 1:(length(k))){
+  
+  for(i in 1:N){
+    
+    # Create variables
+    norm <- rnorm(N) 
+    stud <- rt(N, 1.5) 
+    
+    # normonential 
+    k.norm.vec <- split(norm, ceiling(seq_along(norm)/k[j])) # normonential
+    k.stud.vec <- split(stud, ceiling(seq_along(stud)/k[j])) # studeto
+    
+    
+    mom.norm.vec[j,i] <- round(mom(k.norm.vec), 4)
+    mean.norm.vec[j,i] <- mean(norm)
+    
+    mom.stud.vec[j, i] <- round(mom(k.stud.vec), 4)
+    mean.stud.vec[j, i] <- mean(stud)
+
+  }
+
+}
+```
+
+```{r, echo=FALSE}
+# BIAS, VARIANCE and MSE
+bias.vec.mean.norm <- rep(NA, length(k))
+norm.vec.stud  <- rep(NA, length(k))
+bias.vec.mean.stud  <- rep(NA, length(k))
+var.vec.mean.norm  <- rep(NA, length(k))
+var.vec.mean.stud  <- rep(NA, length(k))
+mse.vec.mean.norm  <- rep(NA, length(k))
+mse.vec.mean.stud  <- rep(NA, length(k))
+
+bias.vec.mom.norm  <- rep(NA, length(k)) 
+bias.vec.mom.stud  <- rep(NA, length(k))
+var.vec.mom.norm  <- rep(NA, length(k))
+var.vec.mom.stud  <- rep(NA, length(k))
+mse.vec.mom.norm  <- rep(NA, length(k))
+mse.vec.mom.stud  <- rep(NA, length(k))
+```
+
+##### Bias, Variance and MSE
+
+```{r}
+for(j in 1:(length(k))){
+  
+  for(i in 1:N){
+
+    bias.vec.mean.norm[j] <- mean(mean.norm.vec[j, ])
+    norm.vec.stud[j]  <- 0
+    bias.vec.mean.stud[j]  <- mean(mean.stud.vec[j, ])-norm.vec.stud[j]
+    var.vec.mean.norm[j]  <- round(var(mean.norm.vec[j, ]), 4)
+    var.vec.mean.stud[j]  <- round(var(mean.stud.vec[j, ]), 4)
+    mse.vec.mean.norm[j]  <- round(var.vec.mean.norm[j]+(bias.vec.mean.norm[j])^2, 6)
+    mse.vec.mean.stud[j]  <- round(var.vec.mean.stud[j]+(bias.vec.mean.stud[j])^2, 6)
+    
+    bias.vec.mom.norm[j]  <- mean(mom.norm.vec[j, ]) 
+    bias.vec.mom.stud[j]  <- mean(mom.stud.vec[j, ])-norm.vec.stud[j]
+    var.vec.mom.norm[j]  <- round(var(mom.norm.vec[j, ]), 4)
+    var.vec.mom.stud[j]  <- round(var(mom.stud.vec[j, ]), 4)
+    mse.vec.mom.norm[j]  <- round(var.vec.mom.norm[j]+(bias.vec.mom.norm[j])^2, 6)
+    mse.vec.mom.stud[j]  <- round(var.vec.mom.stud[j]+(bias.vec.mom.stud[j])^2, 6)
+ 
+  }
+  
+}
+```
+
+### Let's draw our conclusions
+
+
+#### Normal:
+
+```{r, echo = FALSE}
+# Summary for normonential distribution
+mat.norm = c(rowMeans(mean.norm.vec), rowMeans(mom.norm.vec), bias.vec.mean.norm, bias.vec.mom.norm, var.vec.mean.norm, var.vec.mom.norm, mse.vec.mean.norm, mse.vec.mom.norm  )
+mat.norm = matrix(mat.norm, ncol = length(k), byrow = TRUE)
+colnames(mat.norm) = k
+rownames(mat.norm) = c("Mean", "Estimator", "Bias Mean", "Bias MoM", "Variance Mean", "Variance MoM", "MSE mean", "MSE mom")
+t3.k = as.table(mat.norm)
+kable(t3.k) %>% 
+  kable_styling(latex_options = "scale_down")%>%
+  row_spec(7, bold = T, color = "white", background = "#ff8080")%>%
+  row_spec(8, bold = T, color = "white", background = "#85e0e0")
+
+```
+
+##### mean vs mom
+
+```{r, echo = FALSE}
+df <- data.frame(k= k, mean = t3.k["MSE mean",], mom= t3.k["MSE mom",])
+m <- melt(df, id='k')
+ggplot(m,aes(x=k,y=value,fill=variable)) + 
+  geom_bar(stat="identity",position="dodge", alpha=.5)
+
+```
+
+
+##### Student:
+
+```{r, echo = FALSE}
+# Summary for studet distribution
+mat.stud = c(rowMeans(mean.stud.vec), rowMeans(mom.stud.vec), bias.vec.mean.stud, bias.vec.mom.stud, var.vec.mean.stud, var.vec.mom.stud, mse.vec.mean.stud, mse.vec.mom.stud  )
+mat.stud = matrix(mat.stud, ncol = length(k), byrow = TRUE)
+colnames(mat.stud) = k
+rownames(mat.stud) = c("Mean", "Estimator", "Bias Mean", "Bias MoM", "Variance Mean", "Variance MoM", "MSE mean", "MSE mom")
+t4.k = as.table(mat.stud)
+kable(t4.k)%>%
+  kable_styling(latex_options = "scale_down")%>%
+  row_spec(7, bold = T, color = "white", background = "#ff8080")%>%
+  row_spec(8, bold = T, color = "white", background = "#85e0e0")
+```
+
+##### mean vs mom
+
+```{r, echo = FALSE}
+df <- data.frame(k= k, mean = t4.k["MSE mean",], mom= t4.k["MSE mom",])
+m <- melt(df, id='k')
+ggplot(m,aes(x=k,y=value,fill=variable)) + 
+  geom_bar(stat="identity",position="dodge", alpha=.5)
+```
+
+#### Comments:
+Now that we've tried with multiple values of k we can generalize what we've said previously on the MoM and the mean estimator. We used two light tails distribuions (Exponential and Normal) and two heavy tails ones (Pareto and T-Student), and for both we found the same result.
+We've said before that the mean is a good etimator only in some cases,  the deviations of this estimator from the true mean may be large with constant probability unless higher-order
+moments are controlled in some way, such as a subguassianity assumption.
+Since **heavy tailed** distributions have a high variability the mean is not an optimal estimator, but the medians is, because the median is not susceptible to outliers.
+
+
+The results confirm what we've just said, as the Exponential and Normal distribution have the lowest MSE for the mean estimator. And the Pareto and T-Student distribution have the lowest MSE for the MoM estimator.
+
+## Exercise 2 -  Multivariate universe
+
+Function that we used to compute the MoM
+```{r, echo=FALSE}
+mom.multi <- function(mat, sample, k.opt, d ){
+  for(k in 1:d){
+    for (j in 1:k.opt){
+      chunks <- split(sample[,k], cut(seq_along(sample[,k]), k.opt, labels = FALSE))
+      mat[j,k] <- mean(chunks[[j]])
+    }
+  }
+  m_mom <- Gmedian(mat)
+  medians.mom <- rbind(medians.mom, m_mom)
+  return(medians.mom)
+}
+```
+
+
+Parameters:
+
+```{r}
+alpha <- 0.05
+n <- ceiling(8*log(1/alpha))
+dimensions <- c(10,20,30,50) # dimensions
+N <- 1000
+```
+
+### 2.1 Normal multivariate - light tail
+```{r, echo=FALSE}
+# light tails
+mu <- 0
+mat <- matrix(nrow = length(dimensions), ncol = 2)
+for (z in 1:length(dimensions)){
+  means.hat <- matrix(ncol = dimensions[z])
+  medians.mom <- matrix(ncol = dimensions[z])
+  for (i in 1:N){
+    
+    sample <- rmnorm(1000,rep(mu,dimensions[z])) # sample n.obs x dimensions
+    m.h <- c() # 1 x d (where d are dimensions)
+    
+    for (k in 1:dimensions[z]){
+      m.h <- c(m.h, mean(sample[,k])) # mean for each dimension
+    }
+    
+    means.hat <- rbind(means.hat, m.h)
+    
+    mat.mean <- matrix(nrow = n, ncol = dimensions[z])
+    
+    medians.mom <- mom.multi(mat.mean, sample, n, dimensions[z])
+    
+  }
+  
+  medians.mom <- medians.mom[2:(N+1),] # first row is NA
+  means.hat <- means.hat[2:(N+1),] # first row is NA
+  
+  mu_m.h <- c()
+  var_m.h <- c()
+  mu_m_mom <- c()
+  var_m_mom <- c()
+  
+  for(i in 1:dimensions[z]) {
+    mu_m.h <-  c(mu_m.h,mean(means.hat[,i])) 
+    var_m.h <-  c(var_m.h, var(means.hat[,i]))
+    mu_m_mom <-  c(mu_m_mom,mean(medians.mom[,i])) 
+    var_m_mom <-  c(var_m_mom, var(medians.mom[,i])) 
+  }
+  
+  mse.mean <- sum(((mu_m.h - rep(mu, dimensions[z]))^2) + (var_m.h))
+  mse.mom <- sum(((mu_m_mom - rep(mu, dimensions[z]))^2) + (var_m_mom))
+  
+  mat[z,1] <- mse.mean
+  mat[z,2] <- mse.mom
+}
+colnames(mat) <- c("MSE mean", "MSE MoM")
+rownames(mat) <- dimensions
+kable(mat) %>% 
+  kable_styling(latex_options = "scale_down") 
+
+df <- data.frame(dimensions= dimensions, mean = mat[,"MSE mean"], mom= mat[,"MSE MoM"])
+m <- melt(df, id='dimensions')
+ggplot(m,aes(x=dimensions,y=value,fill=variable)) + 
+  geom_bar(stat="identity",position="dodge", alpha=.5)
+```
+
+### 2.2 T - Student multivariate - heavy tail
+
+```{r, echo=FALSE}
+# heavy tail
+mat <- matrix(nrow = length(dimensions), ncol = 2)
+for (z in 1:length(dimensions)){
+  means.hat <- matrix(ncol = dimensions[z])
+  medians.mom <- matrix(ncol = dimensions[z])
+  for (i in 1:N){
+    
+    sample <-rmt(N, rep(mu,dimensions[z]), df = 2)
+    m.h <- c() # 1 x d (where d are dimensions)
+    
+    for (k in 1:dimensions[z]){
+      m.h <- c(m.h, mean(sample[,k])) # mean for each dimension
+    }
+    
+    means.hat <- rbind(means.hat, m.h)
+    
+    mat.mean <- matrix(nrow = n, ncol = dimensions[z])
+    
+    medians.mom <- mom.multi(mat.mean, sample, n, dimensions[z])
+    
+  }
+  
+  medians.mom <- medians.mom[2:(N+1),] # first row is NA
+  means.hat <- means.hat[2:(N+1),] # first row is NA
+  
+  mu_m.h <- c()
+  var_m.h <- c()
+  mu_m_mom <- c()
+  var_m_mom <- c()
+  
+  for(i in 1:dimensions[z]) {
+    mu_m.h <-  c(mu_m.h,mean(means.hat[,i])) 
+    var_m.h <-  c(var_m.h, var(means.hat[,i]))
+    mu_m_mom <-  c(mu_m_mom,mean(medians.mom[,i])) 
+    var_m_mom <-  c(var_m_mom, var(medians.mom[,i])) 
+  }
+  
+  mse.mean <- sum(((mu_m.h - rep(mu, dimensions[z]))^2) + (var_m.h))
+  mse.mom <- sum(((mu_m_mom - rep(mu, dimensions[z]))^2) + (var_m_mom))
+  
+  mat[z,1] <- mse.mean
+  mat[z,2] <- mse.mom
+}
+
+colnames(mat) <- c("MSE mean", "MSE MoM")
+rownames(mat) <- dimensions
+kable(mat) %>% 
+  kable_styling(latex_options = "scale_down") 
+
+df <- data.frame(dimensions= dimensions, mean = mat[,"MSE mean"], mom= mat[,"MSE MoM"])
+m <- melt(df, id='dimensions')
+ggplot(m,aes(x=dimensions,y=value,fill=variable)) + 
+  geom_bar(stat="identity",position="dodge", alpha=.5)
+
+```
+
+
+#### Comments:
+As for the univariate case, even the multivariate one has the same type of result.
+The concept of MoM is similar as well, the idea is to divide the data into disjoint blocks, calculate the empirical mean within each block, and compute a multivariate median
+of the obtained empirical means. However, there is no standard notion of a median
+for multivariate data, we use Gmedian that calculates the geometric median.
+
+As we can see in the plots, for the Multivariate Normal we have a **smaller** MSE when we talk about the **mean**.
+
+If we look at the T-Student multivariate then we can see that there is a **smaller** MSE when we talk about the **MoM**.
+
+
+## Exercise 3 - CRSPday data
+
+We need to takle differents **task**:
+
+ - Data Analysis
+ - What kind of distributions are we dealing with?
+ - Compute MSE for the Median of Means
+
+### 3.1 Data Analysis
+
+```{r load myData, include=FALSE}
+load("CRSPday.RData")
+# Load the data
+data <- CRSPday
+data <- data.frame(data)
+data.df <- data.frame(data)
+attach(data.df)
+```
+
+```{r, echo = FALSE}
+# ge
+df.ge <-data.frame(unclass(summary(ge)))
+colnames(df.ge) <- "General Electrics"
+
+kable(df.ge)%>%
+  kable_styling(position = "center")
+
+ggplot(data = data.df, aes(x = year, y = ge))+
+  geom_line() + 
+  geom_point(colour = 'red')
+
+# ibm
+df.ibm <-data.frame(unclass(summary(ibm)))
+colnames(df.ibm) <- "IBM"
+
+kable(df.ibm)%>%
+  kable_styling(position = "center")
+
+ggplot(data = data.df, aes(x = year, y = ibm))+
+  geom_line() + 
+  geom_point(colour = 'green')
+
+# mobil
+df.mobil <-data.frame(unclass(summary(mobil)))
+colnames(df.mobil) <- "Mobil"
+
+kable(df.mobil)%>%
+  kable_styling(position = "center")
+
+ggplot(data = data.df, aes(x = year, y = mobil))+
+  geom_line() + 
+  geom_point(colour = 'blue')
+
+# crsp
+df.crsp <-data.frame(unclass(summary(crsp)))
+colnames(df.crsp) <- "CRSP"
+
+kable(df.crsp)%>%
+  kable_styling(position = "center")
+
+ggplot(data = data.df, aes(x = year, y = crsp))+
+  geom_line() + 
+  geom_point(colour = 'yellow')
+```
+
+None of these stocks had trend during this period but we can clearly see that all of them had a pretty big fall during between 1990-1991, this because the whole stock market during that time crashed since the oil price dropped after Kuwait was occupied for seven months by the Republic of Iraq.
+
+### 3.2 Satistics analysis
+
+```{r, echo = FALSE}
+# Moments 
+kurt = c(kurtosis(ge), kurtosis(ibm), kurtosis(mobil), kurtosis(crsp), skewness(ge), skewness(ibm), skewness(mobil), skewness(crsp))
+kurt = matrix(kurt, ncol = 4, byrow = TRUE)
+colnames(kurt) = c("General electric","IBM", "Mobil", "CRSP")
+rownames(kurt) = c("Kurtosis", "Skewness")
+ku = as.table(kurt)
+kable(ku)%>%
+  kable_styling(position = "center")
+```
+
+
+
+Skewness is for almost every variable between -0.5 and 0.5, so that means that it's fairly symmetrical.
+On the other side, Kurtosis is in every case greater than 3 (Kurtosis's value for Normal distributions) so that means that all variables are heavy tailed, in other words, extreme values are not unlikely in the sample (Leptokurtic).
+
+
+#### General Electrics
+
+```{r, echo = FALSE}
+# General electrics
+mean.ge <- mean(ge)
+sd.ge <- sd(ge)
+ggplot(data.df, aes(x=ge)) + 
+  geom_histogram(aes(y=..density..), colour="black", fill="white", bins = 20) +
+  geom_density(alpha=.2, fill="#FF6666")+  # Overlay with transparent density plot
+  geom_vline(data = data.df, aes(xintercept = mean.ge), linetype = "solid")
+
+```
+
+
+#### IBM
+
+```{r, echo=FALSE}
+
+# IBM
+mean.ibm <- mean(ibm)
+sd.ibm <- sd(ibm)
+ggplot(data.df, aes(x=ibm)) + 
+  geom_histogram(aes(y=..density..), colour="black", fill="white", bins = 20) +
+  geom_density(alpha=.2, fill="green")+  # Overlay with transparent density plot
+  geom_vline(data = data.df, aes(xintercept = mean.ibm), linetype = "solid")
+```
+
+
+#### Mobil 
+
+```{r, echo=FALSE}
+  
+# Mobil
+mean.mobil <- mean(mobil)
+sd.mobil <- sd(mobil)
+ggplot(data.df, aes(x=mobil)) + 
+  geom_histogram(aes(y=..density..), colour="black", fill="white", bins = 20) +
+  geom_density(alpha=.2, fill="blue")+  # Overlay with transparent density plot
+  geom_vline(data = data.df, aes(xintercept = mean.mobil), linetype = "solid")
+```
+
+
+#### CRSP
+
+```{r, echo=FALSE}
+# crsp
+mean.crsp <- mean(crsp)
+sd.crsp <- sd(crsp)
+ggplot(data.df, aes(x=crsp)) + 
+  geom_histogram(aes(y=..density..), colour="black", fill="white", bins = 20) +
+  geom_density(alpha=.2, fill="yellow")+  # Overlay with transparent density plot
+  geom_vline(data = data.df, aes(xintercept = mean.crsp), linetype = "solid")
+```
+
+
+### Quantile - quantile function 
+
+**General Electric**
+
+
+```{r, echo = FALSE}
+# ge
+ggplot(data.df, aes(sample=ge))+
+  stat_qq(colour = "red")+
+  geom_qq_line(line.p = c(0.25, 0.75), col = "black")+ ylab("GE")
+```
+
+**IBM**
+
+
+```{r, echo = FALSE}
+# ibm 
+ggplot(data.df, aes(sample=ibm))+
+  stat_qq(colour = "green")+
+  geom_qq_line(line.p = c(0.25, 0.75), col = "black")+ ylab("IBM")
+```
+
+**Mobil**
+
+
+```{r, echo = FALSE}
+# mobil 
+ggplot(data.df, aes(sample=mobil))+
+  stat_qq(colour = "blue")+
+  geom_qq_line(line.p = c(0.25, 0.75), col = "black")+ ylab("Mobil")
+```
+
+**CRSP**
+
+
+```{r, echo = FALSE}
+# crsp
+ggplot(data.df, aes(sample=crsp))+
+  stat_qq(colour = "yellow")+
+  geom_qq_line(line.p = c(0.25, 0.75), col = "black")+ ylab("CRSP")
+```
+
+
+
+We can confirm what we've said previously, none of the variables are approximated to a Normal distribution. 
+
+- General Electric: has heavy tails and is slightly positively skewed
+- IBM: has heavy tails and is slightly positively skewed
+- Mobil: out of the bunch it's the one that is more similar to a Normal distribution
+- CRSP: since it's an index built with the latter variables this one has heavy tails as well
+
+
+### Correlation
+
+```{r, echo = FALSE}
+ggpairs(data.df, columns = 4:ncol(data.df), title = "",  
+        axisLabels = "show")
+
+```
+
+This plot shows us that CRSP is higly correlated to all of the other variables (as we've said before, it's an index that contains them all), the only other significant correlation is the one between IBM and General Electric
+
+### 3.3 MSE
+
+This function is used to compute the MSE:
+
+```{r}
+mse <- function(medians_m_mom, xx){
+  
+  mu_boot_m_mom <- c()
+  var_boot_m_mom <- c()
+  mu_hat <- c()
+  
+  for(i in 1:4) {
+    mu_boot_m_mom <-  c(mu_boot_m_mom,mean(medians_m_mom[,i])) 
+    mu_hat <- c(mu_hat, mean(xx[,i]))
+    var_boot_m_mom <-  c(var_boot_m_mom, var(medians_m_mom[,i])) 
+  }
+  
+  mse_m_hat_mom <- sum(((mu_boot_m_mom-mu_hat)^2) + (var_boot_m_mom))
+  return(mse_m_hat_mom)
+}
+```
+
+This function is used to compute the median of means:
+
+```{r}
+f1 <- function(data, index, k){
+  x.boot = data[index, ]
+  medians_m_mom <- matrix(ncol = 4)
+  mean_mat <- matrix(nrow = k, ncol = 4)
+  for (j in 1:k){
+    for (i in 1:4){
+      chunked <- split(x.boot[,i], cut(seq_along(x.boot[,i]), k, labels = FALSE))
+      mean_mat[j,i] <-  mean(chunked[[j]])
+    }
+  }
+  mom_vec <- Gmedian(mean_mat)
+  medians_m_mom <- rbind(medians_m_mom, mom_vec)
+  return (medians_m_mom)
+}
+```
+
+Bootstrap:
+
+```{r}
+B<-1000
+xx<- data[,4:7]
+k = seq(10, 100, 5)
+res <- rep (NA, length(k))
+for (i in 1:length(k)){
+  results <- boot(xx, statistic=f1, R=B, k = k[i])
+  
+  medians_m_mom <- matrix(results["t"])
+  medians_m_mom <- medians_m_mom[[1]][ , colSums(is.na(medians_m_mom[[1]])) == 0]
+  
+  res[i] <- mse(medians_m_mom, xx)
+}
+```
+
+#### This is what we get, for which k do we have the best MSE? 
+
+```{r, echo = FALSE}
+mat = matrix(res, ncol = length(k), byrow = TRUE)
+colnames(mat) = k
+rownames(mat) = "MSE"
+res.t = as.table(mat)
+kable(res.t) %>% 
+  kable_styling(latex_options = "scale_down") 
+
+```
+
+
+All of these values are really low, this because after the analysis we did we can state that we are dealing with a multivariate variable with **heavy tails** and es we've seen in Exercise n. 2 the MoM estimator is the best one. The best value of k is 40 (since it has the smallest MSE)
